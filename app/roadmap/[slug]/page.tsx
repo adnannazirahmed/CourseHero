@@ -5,7 +5,7 @@ import { getDb } from "@/lib/db";
 import { getCompletedIds, getSkippedIds } from "@/lib/data";
 import { formatDuration } from "@/lib/plan";
 import { AppHeader } from "@/components/AppHeader";
-import { ArrowLeft, ArrowRight, Check, Layers, Play } from "@/components/icons";
+import { ArrowLeft, ArrowRight, Check, Layers, Play, Sparkle } from "@/components/icons";
 import { enrollInRoadmap } from "@/app/roadmaps/actions";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ type RoadmapRow = {
   title: string;
   slug: string;
   description: string;
+  goal: string;
   created_at: string;
 };
 
@@ -79,6 +80,9 @@ export default async function RoadmapPage({
               <p className="page-sub">
                 {roadmap.description || "Courses in the order you want to study them."}
               </p>
+              {roadmap.goal ? (
+                <p className="course-goal-line"><Sparkle size={12} /> Goal: {roadmap.goal}</p>
+              ) : null}
               <div className="course-detail-meta" style={{ marginTop: 12 }}>
                 <span>{stages.length} stages</span>
                 <span className="dot-sep" />

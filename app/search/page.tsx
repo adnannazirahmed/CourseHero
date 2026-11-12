@@ -122,7 +122,11 @@ export default async function SearchPage({
                 {results.transcripts.map((hit, index) => (
                   <Link
                     key={`${hit.course_id}-${hit.video_id}-${hit.start_seconds}-${index}`}
-                    href={`/course/${hit.course_id}`}
+                    href={
+                      hit.lesson_id
+                        ? `/course/${hit.course_id}/lesson/${hit.lesson_id}?t=${hit.start_seconds}`
+                        : `/course/${hit.course_id}`
+                    }
                     className="transcript-hit"
                   >
                     <span className="transcript-hit-head">

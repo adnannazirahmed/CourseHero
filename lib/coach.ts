@@ -100,7 +100,8 @@ function fallback(userId: string): CoachContent {
   if (value.notes === 0) actions.push("Pin one note in the lesson you watch next.");
   actions.push("Pick one concept and explain it without replaying the video.");
   while (actions.length < 3) {
-    actions.push("Open your weakest course and finish one more lesson.");
+    actions.push("Revisit one quiz answer you got wrong and explain why.");
+    if (actions.length < 3) actions.push("Write one sentence that captures what you learned.");
   }
   return {
     summary: value.completed

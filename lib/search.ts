@@ -25,6 +25,7 @@ export type SearchResults = {
     course_id: string;
     course_title: string;
     video_id: string;
+    lesson_id: string | null;
     start_seconds: number;
     text: string;
   }>;
@@ -69,7 +70,12 @@ export function searchLibrary(userId: string, rawQuery: string): SearchResults {
 
   const transcripts = db
     .prepare(
-      `SELECT t.course_id, c.title AS course_title, t.video_id, t.start_seconds, t.text
+      `SELECT t.course_id, c.title AS course_title, t.video_id, t.start_seconds, t.text,
+              (SELECT l.id FROM lessons l
+               WHERE l.course_id = t.course_id
+                 AND (l.video_id = t.video_id OR l.video_id IS NULL)
+                 AND t.start_seconds >= l.start_seconds AND t.start_seconds <= l.end_seconds
+               ORDER BY l.position ASC LIMIT 1) AS lesson_id
        FROM transcript_chunks t JOIN courses c ON c.id = t.course_id
        WHERE (c.visibility = 'public' OR c.owner_id = ?) AND t.text LIKE ?
        ORDER BY t.start_seconds ASC LIMIT 20`,

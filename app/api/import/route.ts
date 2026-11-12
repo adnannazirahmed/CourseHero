@@ -131,15 +131,19 @@ export async function POST(request: Request) {
           ? `https://www.youtube.com/watch?v=${videoId}`
           : `https://www.youtube.com/playlist?list=${playlistId}`;
         const status = course.status === "ready" ? "ready" : "failed";
+        const difficulty = ["beginner", "intermediate", "advanced"].includes(String(course.difficulty))
+          ? String(course.difficulty)
+          : "beginner";
         db.prepare(`INSERT INTO courses
           (id, owner_id, title, slug, youtube_url, youtube_id, playlist_id, author, thumbnail,
-           duration_seconds, description, source, pace_minutes, target_days, status, error,
-           visibility, added_by, popularity, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+           duration_seconds, description, source, pace_minutes, target_days, course_goal, difficulty,
+           status, error, visibility, added_by, popularity, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(id, user.id, title, slugify(title, id.slice(-8)), url, videoId, playlistId,
             optionalStr(course.author, 120), videoId ? `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg` : "",
             integer(course.duration_seconds), optionalStr(course.description), videoId ? "video" : "playlist",
-            integer(course.pace_minutes, 1, 1440), integer(course.target_days, 1, 30), status,
+            integer(course.pace_minutes, 1, 1440), integer(course.target_days, 1, 30),
+            optionalStr(course.course_goal, 500), difficulty, status,
             status === "failed" ? "Imported unfinished build. Try again." : null,
             course.visibility === "private" ? "private" : "public",
             optionalStr(course.added_by, 80), integer(course.popularity), date(course.created_at), now);
@@ -211,9 +215,10 @@ export async function POST(request: Request) {
       for (const roadmap of roadmaps) {
         const id = mapped(roadmapIds, roadmap.id);
         const title = str(roadmap.title, 100);
-        db.prepare(`INSERT INTO roadmaps (id, owner_id, title, slug, description, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)`)
-          .run(id, user.id, title, slugify(title, id.slice(-8)), optionalStr(roadmap.description, 500), date(roadmap.created_at));
+        db.prepare(`INSERT INTO roadmaps (id, owner_id, title, slug, description, goal, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, user.id, title, slugify(title, id.slice(-8)), optionalStr(roadmap.description, 500),
+            optionalStr(roadmap.goal, 500), date(roadmap.created_at));
       }
       for (const item of roadmapItems) {
         db.prepare(`INSERT INTO roadmap_items (id, roadmap_id, course_id, position) VALUES (?, ?, ?, ?)`)

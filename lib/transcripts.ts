@@ -150,7 +150,7 @@ export function formatChunkContext(chunks: TranscriptChunk[], maxChars = 18_000)
   let total = 0;
   const lines: string[] = [];
   for (const chunk of chunks) {
-    const line = `[${Math.round(chunk.start_seconds)}s] ${chunk.text}`;
+    const line = `[${transcriptSeconds(chunk.start_seconds)}] ${chunk.text}`;
     if (total + line.length > maxChars) break;
     lines.push(line);
     total += line.length;
