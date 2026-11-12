@@ -17,6 +17,8 @@ export type CourseRow = {
   source: string;
   pace_minutes: number;
   target_days: number;
+  course_goal: string;
+  difficulty: string;
   enrollment_target_days?: number | null;
   status: string;
   error: string | null;

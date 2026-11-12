@@ -1,5 +1,13 @@
 import "server-only";
 import { getDb } from "./db";
+import { aiJson, getAiStatus } from "./ai";
+import {
+  ensureCourseTranscript,
+  formatChunkContext,
+  getChunks,
+  pickChunks,
+  saveTranscript,
+} from "./transcripts";
 import { slugify, formatClock } from "./plan";
 import {
   fetchPlaylist,
@@ -237,17 +245,6 @@ function fallbackLessons(meta: VideoMeta, transcript: TranscriptItem[]): Generat
   return lessons;
 }
 
-function aiConfig() {
-  const apiKey = process.env.AI_API_KEY;
-  const model = process.env.AI_MODEL;
-  if (!apiKey || !model) return null;
-  return {
-    apiKey,
-    model,
-    baseUrl: (process.env.AI_BASE_URL || "https://freebuff.com/api/v1/paid").replace(/\/$/, ""),
-  };
-}
-
 function transcriptDigest(transcript: TranscriptItem[]): string {
   if (transcript.length === 0) return "";
   const lines: string[] = [];
@@ -263,9 +260,9 @@ function transcriptDigest(transcript: TranscriptItem[]): string {
 async function generateWithAI(
   meta: VideoMeta,
   transcript: TranscriptItem[],
+  options: { goal?: string; difficulty?: string } = {},
 ): Promise<GeneratedLesson[]> {
-  const config = aiConfig();
-  if (!config) return [];
+  if (!getAiStatus().configured) return [];
   const digest = transcriptDigest(transcript);
   if (!digest && !meta.description) return [];
 
@@ -275,6 +272,8 @@ Video: ${meta.title}
 Creator: ${meta.author}
 Length: ${meta.durationSeconds ? formatClock(meta.durationSeconds) : "unknown"}
 Description: ${meta.description.slice(0, 1500)}
+Course goal from the learner: ${options.goal || "not specified"}
+Difficulty: ${options.difficulty || "beginner"}
 
 Transcript with timestamps:
 ${digest || "(transcript unavailable; use the description)"}
@@ -291,42 +290,19 @@ Return ONLY valid JSON, no markdown fence:
 {"lessons":[{"title":"","startSeconds":0,"endSeconds":600,"notes":"","quiz":{"question":"","options":["","","",""],"answerIndex":0,"explanation":"","replaySeconds":0}}]}`;
 
   try {
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        temperature: 0.3,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You write precise study courses from video transcripts. Output valid JSON only. Never invent facts that are not in the transcript.",
-          },
-          { role: "user", content: prompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
-      signal: AbortSignal.timeout(120_000),
+    const parsed = await aiJson<{ lessons?: Array<Record<string, unknown>> }>({
+      task: "course",
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You write precise study courses from video transcripts. Output valid JSON only. Never invent facts that are not in the transcript.",
+        },
+        { role: "user", content: prompt },
+      ],
     });
-    if (!response.ok) {
-      console.warn("[generate] AI request failed", response.status, await response.text());
-      return [];
-    }
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = payload.choices?.[0]?.message?.content ?? "";
-    const start = content.indexOf("{");
-    const end = content.lastIndexOf("}");
-    if (start === -1 || end === -1) return [];
-    const parsed = JSON.parse(content.slice(start, end + 1)) as {
-      lessons?: Array<Record<string, unknown>>;
-    };
-    if (!Array.isArray(parsed.lessons)) return [];
+    if (!Array.isArray(parsed?.lessons)) return [];
 
     const duration = meta.durationSeconds || Infinity;
     return parsed.lessons
@@ -374,7 +350,11 @@ Return ONLY valid JSON, no markdown fence:
   }
 }
 
-async function generateSingleVideo(videoId: string): Promise<{
+async function generateSingleVideo(
+  videoId: string,
+  courseId: string,
+  options: { goal?: string; difficulty?: string },
+): Promise<{
   meta: VideoMeta;
   lessons: GeneratedLesson[];
 }> {
@@ -383,7 +363,8 @@ async function generateSingleVideo(videoId: string): Promise<{
   if (transcript.length === 0) {
     throw new Error("We couldn't read this video's captions. It may be unavailable, private, or age-restricted.");
   }
-  let lessons = await generateWithAI(meta, transcript);
+  saveTranscript(courseId, videoId, transcript);
+  let lessons = await generateWithAI(meta, transcript, options);
   if (lessons.length < 2) lessons = fallbackLessons(meta, transcript);
   if (lessons.length === 0) {
     throw new Error("We couldn't read this video. It may be private, age-restricted, or have no captions.");
@@ -391,8 +372,48 @@ async function generateSingleVideo(videoId: string): Promise<{
   return { meta, lessons };
 }
 
+function compactDigest(transcript: TranscriptItem[], maxChars = 1800): string {
+  const lines: string[] = [];
+  let total = 0;
+  let next = 0;
+  for (const item of transcript) {
+    if (item.offset < next) continue;
+    next = item.offset + 35;
+    const line = `[${formatClock(item.offset)}] ${clean(item.text)}`;
+    if (total + line.length > maxChars) break;
+    lines.push(line);
+    total += line.length;
+  }
+  return lines.join("\n");
+}
+
+function normalizeQuiz(raw: unknown, fallbackSeconds: number): GeneratedQuiz | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const quiz = raw as Record<string, unknown>;
+  const options = Array.isArray(quiz.options) ? quiz.options.map(String).slice(0, 4) : [];
+  const answerIndex = Number(quiz.answerIndex);
+  if (
+    typeof quiz.question !== "string" ||
+    options.length !== 4 ||
+    !Number.isInteger(answerIndex) ||
+    answerIndex < 0 ||
+    answerIndex > 3
+  ) {
+    return undefined;
+  }
+  return {
+    question: quiz.question,
+    options,
+    answerIndex,
+    explanation: typeof quiz.explanation === "string" ? quiz.explanation : "",
+    replaySeconds: Math.max(0, Number(quiz.replaySeconds) || fallbackSeconds),
+  };
+}
+
 async function generatePlaylistCourse(
   playlistId: string,
+  courseId: string,
+  options: { goal?: string; difficulty?: string },
 ): Promise<{ meta: VideoMeta; lessons: GeneratedLesson[] }> {
   const playlist = await fetchPlaylist(playlistId);
   if (playlist.videos.length === 0) {
@@ -412,16 +433,100 @@ async function generatePlaylistCourse(
     throw new Error("The first playlist video exceeds the 20-hour course limit.");
   }
 
-  const lessons: GeneratedLesson[] = [];
+  const videoData: Array<{
+    videoId: string;
+    title: string;
+    durationSeconds: number;
+    cursor: number;
+    transcript: TranscriptItem[];
+  }> = [];
   let cursor = 0;
-  for (let index = 0; index < videos.length; index++) {
-    const video = videos[index];
+  for (const video of videos) {
     const transcript = await fetchTranscript(video.videoId).catch(() => []);
-    const range = sentencesFromTranscript(transcript);
-    const corpus = topKeywords(transcript.map((item) => item.text).join(" "), 24);
-    const notes = range.length
-      ? buildNotes(video.title, range, 0, video.durationSeconds)
-      : `### What this lesson covers
+    if (transcript.length) saveTranscript(courseId, video.videoId, transcript);
+    videoData.push({ ...video, cursor, transcript });
+    cursor += video.durationSeconds;
+  }
+
+  let lessons: GeneratedLesson[] = [];
+  if (getAiStatus().configured) {
+    const playlistContext = videoData
+      .map((video, index) => {
+        const digest = compactDigest(video.transcript);
+        return `VIDEO ${index}: ${video.title} (${Math.round(video.durationSeconds / 60)} min)
+${digest || "(no transcript available)"}`;
+      })
+      .join("\n\n")
+      .slice(0, 26_000);
+
+    const parsed = await aiJson<{ lessons?: Array<Record<string, unknown>> }>({
+      task: "playlist",
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You design one coherent course from a YouTube playlist. Output valid JSON only. Never invent facts that are not in the supplied transcripts.",
+        },
+        {
+          role: "user",
+          content: `Playlist: ${playlist.title}
+Creator: ${playlist.author}
+Learner goal: ${options.goal || "not specified"}
+Difficulty: ${options.difficulty || "beginner"}
+
+${playlistContext}
+
+Create 4-14 lessons that cover the playlist in order. Each lesson must belong to one video. Do not split a single video into more than 3 lessons. Skip intro/housekeeping material. For each lesson return:
+- videoIndex: the VIDEO number above
+- title: specific, 3-8 words
+- startSeconds and endSeconds: relative to that video, integers
+- notes: 120-220 words of markdown study notes with an overview, 3 key ideas as bullets, and one "Check yourself" question
+- quiz: exactly 4 options, answerIndex 0-3, explanation, replaySeconds relative to that video
+
+Return ONLY JSON: {"lessons":[{"videoIndex":0,"title":"","startSeconds":0,"endSeconds":600,"notes":"","quiz":{"question":"","options":["","","",""],"answerIndex":0,"explanation":"","replaySeconds":0}}]}`,
+        },
+      ],
+    });
+
+    if (Array.isArray(parsed?.lessons)) {
+      lessons = parsed.lessons
+        .map((raw): GeneratedLesson | null => {
+          const videoIndex = Math.round(Number(raw.videoIndex));
+          const video = videoData[videoIndex];
+          if (!video) return null;
+          const title = typeof raw.title === "string" ? raw.title.trim() : "";
+          const notes = typeof raw.notes === "string" ? raw.notes.trim() : "";
+          if (!title || notes.length < 40) return null;
+          const localStart = clamp(Number(raw.startSeconds) || 0, 0, video.durationSeconds);
+          const localEnd = clamp(
+            Number(raw.endSeconds) || localStart + 600,
+            localStart + 60,
+            video.durationSeconds || localStart + 600,
+          );
+          return {
+            title: title.slice(0, 100),
+            startSeconds: video.cursor + localStart,
+            endSeconds: video.cursor + localEnd,
+            videoId: video.videoId,
+            notes,
+            quiz: normalizeQuiz(raw.quiz, localStart),
+          };
+        })
+        .filter((lesson): lesson is GeneratedLesson => lesson !== null)
+        .sort((a, b) => a.startSeconds - b.startSeconds);
+    }
+  }
+
+  if (lessons.length < 2) {
+    lessons = [];
+    for (let index = 0; index < videoData.length; index++) {
+      const video = videoData[index];
+      const range = sentencesFromTranscript(video.transcript);
+      const corpus = topKeywords(video.transcript.map((item) => item.text).join(" "), 24);
+      const notes = range.length
+        ? buildNotes(video.title, range, 0, video.durationSeconds)
+        : `### What this lesson covers
 
 **${video.title}** — part ${index + 1} of the playlist.
 
@@ -431,15 +536,15 @@ Watch this video end to end, then add a note with the moment that matters most. 
 
 - Note the one idea you would explain to a friend.
 - Replay any demo once before moving on.`;
-    lessons.push({
-      title: video.title.slice(0, 100),
-      startSeconds: cursor,
-      endSeconds: cursor + video.durationSeconds,
-      videoId: video.videoId,
-      notes,
-      quiz: makeQuiz(range, corpus) ?? undefined,
-    });
-    cursor += video.durationSeconds;
+      lessons.push({
+        title: video.title.slice(0, 100),
+        startSeconds: video.cursor,
+        endSeconds: video.cursor + video.durationSeconds,
+        videoId: video.videoId,
+        notes,
+        quiz: makeQuiz(range, corpus) ?? undefined,
+      });
+    }
   }
 
   return {
@@ -526,6 +631,8 @@ export async function generateCourse(courseId: string) {
         youtube_id: string | null;
         playlist_id: string | null;
         slug: string;
+        course_goal: string;
+        difficulty: string;
       }
     | undefined;
   if (!course) return;
@@ -536,9 +643,15 @@ export async function generateCourse(courseId: string) {
 
   try {
     const result = course.youtube_id
-      ? await generateSingleVideo(course.youtube_id)
+      ? await generateSingleVideo(course.youtube_id, courseId, {
+          goal: course.course_goal,
+          difficulty: course.difficulty,
+        })
       : course.playlist_id
-        ? await generatePlaylistCourse(course.playlist_id)
+        ? await generatePlaylistCourse(course.playlist_id, courseId, {
+            goal: course.course_goal,
+            difficulty: course.difficulty,
+          })
         : null;
     if (!result) throw new Error("No YouTube video or playlist found.");
 
@@ -598,6 +711,98 @@ export function recoverStaleGenerations() {
       "UPDATE courses SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'generating'",
     ).run("The server stopped before this build finished. Try again to resume.", new Date().toISOString(), course.id);
   }
+}
+
+export async function regenerateLesson(courseId: string, lessonId: string) {
+  const db = getDb();
+  const lesson = db
+    .prepare(
+      `SELECT l.id, l.title, l.start_seconds, l.end_seconds, l.video_id, c.youtube_id, c.title AS course_title,
+              c.course_goal, c.difficulty
+       FROM lessons l JOIN courses c ON c.id = l.course_id
+       WHERE l.id = ? AND l.course_id = ?`,
+    )
+    .get(lessonId, courseId) as
+    | {
+        id: string;
+        title: string;
+        start_seconds: number;
+        end_seconds: number;
+        video_id: string | null;
+        youtube_id: string | null;
+        course_title: string;
+        course_goal: string;
+        difficulty: string;
+      }
+    | undefined;
+  if (!lesson) throw new Error("Lesson not found.");
+  if (!getAiStatus().configured) throw new Error("AI is not configured. Add AI_API_KEY and AI_MODEL to .env, then restart.");
+  const videoId = lesson.video_id || lesson.youtube_id;
+  if (!videoId) throw new Error("This lesson has no video to regenerate from.");
+  await ensureCourseTranscript(courseId, videoId);
+  let chunks = getChunks(courseId, videoId, lesson.start_seconds, lesson.end_seconds);
+  if (chunks.length === 0) chunks = getChunks(courseId, videoId);
+  const context = formatChunkContext(pickChunks(chunks, lesson.title, 24), 22_000);
+  if (!context) throw new Error("No transcript is available for this lesson yet.");
+
+  const parsed = await aiJson<{
+    title?: string;
+    notes?: string;
+    quiz?: { question?: string; options?: string[]; answerIndex?: number; explanation?: string; replaySeconds?: number };
+  }>({
+    task: "lesson",
+    temperature: 0.3,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You rewrite one lesson from a course using only the supplied transcript. Output valid JSON only. Never invent facts.",
+      },
+      {
+        role: "user",
+        content: `Course: ${lesson.course_title}
+Lesson: ${lesson.title}
+Learner goal: ${lesson.course_goal || "not specified"}
+Difficulty: ${lesson.difficulty || "beginner"}
+
+Transcript for this lesson:
+${context}
+
+Rewrite this lesson. Keep the same topic. Return 120-220 words of markdown study notes with an overview, 3 key ideas, and one "Check yourself" question. Add one quiz with exactly 4 options and a replay timestamp relative to the lesson.
+JSON: {"title":"","notes":"","quiz":{"question":"","options":["","","",""],"answerIndex":0,"explanation":"","replaySeconds":0}}`,
+      },
+    ],
+  });
+
+  const notes = typeof parsed?.notes === "string" ? parsed.notes.trim() : "";
+  if (notes.length < 40) throw new Error("The AI did not return usable notes. Try again.");
+  const title = typeof parsed?.title === "string" && parsed.title.trim() ? parsed.title.trim().slice(0, 100) : lesson.title;
+  const quiz = normalizeQuiz(parsed?.quiz, 0);
+  const now = new Date().toISOString();
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE lessons SET title = ?, notes = ? WHERE id = ?").run(title, notes, lesson.id);
+    if (quiz) {
+      db.prepare("DELETE FROM quizzes WHERE lesson_id = ?").run(lesson.id);
+      db.prepare(
+        `INSERT INTO quizzes (id, lesson_id, question, options, answer_index, explanation, replay_seconds)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        `quiz-${crypto.randomUUID()}`,
+        lesson.id,
+        quiz.question,
+        JSON.stringify(quiz.options),
+        quiz.answerIndex,
+        quiz.explanation,
+        Math.round(quiz.replaySeconds),
+      );
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { title, notes, quiz: quiz ?? null, updatedAt: now };
 }
 
 export function startGeneration(courseId: string) {

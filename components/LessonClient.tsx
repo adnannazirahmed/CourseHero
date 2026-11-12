@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { FormEvent, ReactNode, useState } from "react";
 import { formatClock, parseClock } from "@/lib/plan";
-import { ArrowLeft, ArrowRight, Check, Clock, Note, Play, Trash } from "./icons";
+import { ArrowLeft, ArrowRight, Check, Clock, Note, Play, Sparkle, Trash } from "./icons";
+import { AiNotesTools } from "./AiNotesTools";
+import { TutorPanel } from "./TutorPanel";
 
 type LessonDTO = {
   id: string;
@@ -113,6 +115,8 @@ export function LessonClient({
   sidebarLessons,
   initialDoneCount,
   nextLesson,
+  aiConfigured,
+  canRegenerate,
 }: {
   course: { id: string; title: string; youtube_id: string | null };
   lesson: LessonDTO;
@@ -124,6 +128,8 @@ export function LessonClient({
   sidebarLessons: SidebarLesson[];
   initialDoneCount: number;
   nextLesson: { id: string; title: string; startSeconds: number } | null;
+  aiConfigured: boolean;
+  canRegenerate: boolean;
 }) {
   const [startAt, setStartAt] = useState(Math.max(0, initialStart));
   const [playerKey, setPlayerKey] = useState(0);
@@ -137,7 +143,7 @@ export function LessonClient({
   const [savedPersonalNote, setSavedPersonalNote] = useState(initialPersonalNote);
   const [personalBusy, setPersonalBusy] = useState(false);
   const [personalStatus, setPersonalStatus] = useState("");
-  const [tab, setTab] = useState<"study" | "notes">("study");
+  const [tab, setTab] = useState<"study" | "notes" | "ai">("study");
   const [selected, setSelected] = useState<number | null>(null);
   const [answered, setAnswered] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -253,6 +259,19 @@ export function LessonClient({
     setPersonalBusy(false);
   }
 
+  async function regenerateLesson() {
+    if (!canRegenerate || !aiConfigured) return;
+    setSaveError("");
+    try {
+      const response = await fetch(`/api/lessons/${lesson.id}/regenerate`, { method: "POST" });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(data.error ?? "Could not regenerate this lesson.");
+      window.location.reload();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not regenerate this lesson.");
+    }
+  }
+
   async function deleteNote(id: string) {
     const previous = notes;
     setSaveError("");
@@ -349,11 +368,36 @@ export function LessonClient({
               >
                 Your notes ({notes.length})
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "ai"}
+                className={`tab ${tab === "ai" ? "active" : ""}`}
+                onClick={() => setTab("ai")}
+              >
+                <Sparkle size={12} /> Ask AI
+              </button>
             </div>
 
             {tab === "study" ? (
               <div className="tab-panel">
                 <StudyNotes markdown={lesson.notes} />
+                <AiNotesTools
+                  courseId={course.id}
+                  lessonId={lesson.id}
+                  configured={aiConfigured}
+                  canRegenerate={canRegenerate}
+                  onRegenerate={regenerateLesson}
+                />
+              </div>
+            ) : tab === "ai" ? (
+              <div className="tab-panel">
+                <TutorPanel
+                  courseId={course.id}
+                  lessonId={lesson.id}
+                  configured={aiConfigured}
+                  onSeek={replay}
+                />
               </div>
             ) : (
               <div className="tab-panel">

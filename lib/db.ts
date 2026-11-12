@@ -195,6 +195,62 @@ function migrate(db: DatabaseSync) {
     );
     CREATE INDEX IF NOT EXISTS generation_attempts_time_idx ON generation_attempts(created_at);
     CREATE INDEX IF NOT EXISTS generation_attempts_user_idx ON generation_attempts(user_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS transcripts (
+      video_id TEXT PRIMARY KEY,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS transcript_chunks (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      video_id TEXT NOT NULL,
+      start_seconds INTEGER NOT NULL DEFAULT 0,
+      end_seconds INTEGER NOT NULL DEFAULT 0,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS transcript_chunks_course_idx ON transcript_chunks(course_id, start_seconds);
+    CREATE INDEX IF NOT EXISTS transcript_chunks_video_idx ON transcript_chunks(course_id, video_id);
+
+    CREATE TABLE IF NOT EXISTS quiz_reviews (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      quiz_id TEXT NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+      lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+      course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+      due_at TEXT NOT NULL,
+      interval_days INTEGER NOT NULL DEFAULT 1,
+      misses INTEGER NOT NULL DEFAULT 0,
+      last_result TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, quiz_id)
+    );
+    CREATE INDEX IF NOT EXISTS quiz_reviews_due_idx ON quiz_reviews(user_id, due_at);
+
+    CREATE TABLE IF NOT EXISTS weekly_coach (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      week_key TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      actions TEXT NOT NULL DEFAULT '[]',
+      focus TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, week_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_usage (
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      task TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ai_usage_user_idx ON ai_usage(user_id, created_at);
   `);
 
   const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>;
@@ -218,6 +274,16 @@ function migrate(db: DatabaseSync) {
   }>;
   if (!lessonStateColumns.some((column) => column.name === "note_text")) {
     db.exec("ALTER TABLE lesson_state ADD COLUMN note_text TEXT NOT NULL DEFAULT ''");
+  }
+  if (!courseColumns.some((column) => column.name === "course_goal")) {
+    db.exec("ALTER TABLE courses ADD COLUMN course_goal TEXT NOT NULL DEFAULT ''");
+  }
+  if (!courseColumns.some((column) => column.name === "difficulty")) {
+    db.exec("ALTER TABLE courses ADD COLUMN difficulty TEXT NOT NULL DEFAULT 'beginner'");
+  }
+  const roadmapColumns = db.prepare("PRAGMA table_info(roadmaps)").all() as Array<{ name: string }>;
+  if (!roadmapColumns.some((column) => column.name === "goal")) {
+    db.exec("ALTER TABLE roadmaps ADD COLUMN goal TEXT NOT NULL DEFAULT ''");
   }
   db.prepare("UPDATE users SET email = 'demo@coursehero.local' WHERE email = 'demo@courseit.local'").run();
 }

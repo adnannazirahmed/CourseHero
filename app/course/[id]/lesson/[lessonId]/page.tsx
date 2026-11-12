@@ -12,6 +12,7 @@ import {
 } from "@/lib/data";
 import { AppHeader } from "@/components/AppHeader";
 import { LessonClient } from "@/components/LessonClient";
+import { getAiStatus } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 
@@ -115,6 +116,8 @@ export default async function LessonPage({
             }))}
             initialDoneCount={doneCount}
             nextLesson={next ? { id: next.id, title: next.title, startSeconds: next.start_seconds } : null}
+            aiConfigured={getAiStatus().configured}
+            canRegenerate={course.owner_id === user.id}
           />
         </div>
       </main>

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getLocalUser } from "@/lib/auth";
 import { getCourse, getLessons, getQuizzesForCourse } from "@/lib/data";
+import { getDb } from "@/lib/db";
 import { AppHeader } from "@/components/AppHeader";
 import { PlacementClient } from "@/components/PlacementClient";
 import { ArrowLeft, Target } from "@/components/icons";
@@ -19,13 +20,28 @@ export default async function PlacementPage({ params }: { params: Promise<{ id: 
   const quizzes = getQuizzesForCourse(course.id);
   const lessonById = new Map(lessons.map((lesson) => [lesson.id, lesson]));
 
+  const attempts = new Map(
+    (
+      getDb()
+        .prepare(
+          "SELECT lesson_id, quiz_correct FROM lesson_state WHERE user_id = ? AND course_id = ? AND quiz_correct IS NOT NULL",
+        )
+        .all(user.id, course.id) as Array<{ lesson_id: string; quiz_correct: number }>
+    ).map((row) => [row.lesson_id, row.quiz_correct]),
+  );
   const candidates = quizzes
     .map((quiz) => ({ quiz, lesson: lessonById.get(quiz.lesson_id) }))
-    .filter((entry): entry is { quiz: (typeof quizzes)[number]; lesson: (typeof lessons)[number] } => Boolean(entry.lesson));
+    .filter((entry): entry is { quiz: (typeof quizzes)[number]; lesson: (typeof lessons)[number] } => Boolean(entry.lesson))
+    .sort((a, b) => {
+      const rank = (lessonId: string) => {
+        const result = attempts.get(lessonId);
+        return result === undefined ? 1 : result === 1 ? 2 : 0;
+      };
+      return rank(a.lesson.id) - rank(b.lesson.id) || a.lesson.position - b.lesson.position;
+    });
 
   const target = Math.min(6, candidates.length);
-  const step = target > 0 ? Math.max(1, Math.floor(candidates.length / target)) : 1;
-  const selected = candidates.filter((_, index) => index % step === 0).slice(0, target);
+  const selected = candidates.slice(0, target);
 
   const questions = selected.map(({ quiz, lesson }) => {
     let options: string[] = [];

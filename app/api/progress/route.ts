@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getLocalUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { newId } from "@/lib/password";
+import { recordQuizAttempt } from "@/lib/reviews";
 
 function canAccess(userId: string, courseId: string) {
   const db = getDb();
@@ -90,6 +91,10 @@ export async function POST(request: Request) {
     db.prepare(
       "INSERT INTO activities (id, user_id, course_id, lesson_id, kind, created_at) VALUES (?, ?, ?, ?, 'completed', ?)",
     ).run(newId("activity-"), user.id, lesson.course_id, lesson.id, now);
+  }
+
+  if (typeof body.quizCorrect === "boolean") {
+    recordQuizAttempt(user.id, lesson.id, body.quizCorrect);
   }
 
   return NextResponse.json({ ok: true, completed });

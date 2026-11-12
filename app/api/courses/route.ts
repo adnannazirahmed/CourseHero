@@ -10,7 +10,7 @@ import { parseYouTubeUrl } from "@/lib/youtube-url";
 export async function POST(request: Request) {
   const user = getLocalUser();
 
-  let body: { url?: string; days?: number };
+  let body: { url?: string; days?: number; goal?: string; difficulty?: string };
   try {
     body = await request.json();
   } catch {
@@ -29,6 +29,10 @@ export async function POST(request: Request) {
   if (!Number.isFinite(days) || days < 1 || days > 30) {
     return NextResponse.json({ error: "Choose a finish line between 1 and 30 days." }, { status: 400 });
   }
+  const goal = String(body.goal ?? "").trim().slice(0, 500);
+  const difficulty = ["beginner", "intermediate", "advanced"].includes(String(body.difficulty))
+    ? String(body.difficulty)
+    : "beginner";
   const db = getDb();
   const id = newId("course-");
   const suffix = id.replace("course-", "").slice(0, 6);
@@ -37,8 +41,8 @@ export async function POST(request: Request) {
 
   const limitError = reserveGeneration(user.id, id, () => {
     db.prepare(
-      `INSERT INTO courses (id, owner_id, title, slug, youtube_url, youtube_id, playlist_id, author, thumbnail, duration_seconds, description, source, pace_minutes, target_days, status, visibility, added_by, popularity, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, 60, ?, 'generating', 'public', ?, 0, ?, ?)`,
+      `INSERT INTO courses (id, owner_id, title, slug, youtube_url, youtube_id, playlist_id, author, thumbnail, duration_seconds, description, source, pace_minutes, target_days, course_goal, difficulty, status, visibility, added_by, popularity, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, 60, ?, ?, ?, 'generating', 'public', ?, 0, ?, ?)`,
     ).run(
       id,
       user.id,
@@ -49,6 +53,8 @@ export async function POST(request: Request) {
       parsed.videoId ? null : parsed.playlistId,
       parsed.videoId ? "video" : "playlist",
       days,
+      goal,
+      difficulty,
       user.name,
       now,
       now,

@@ -5,7 +5,10 @@ import { recoverStaleGenerations } from "@/lib/generate";
 import { dayKey, formatClock, formatDuration, planForTargetDays } from "@/lib/plan";
 import { AppHeader } from "@/components/AppHeader";
 import { ImportBackupForm } from "@/components/ImportBackupForm";
-import { ArrowRight, BookOpen, Flame, Note, Play, Plus, Share, Sparkle, Target } from "@/components/icons";
+import { WeeklyCoach } from "@/components/WeeklyCoach";
+import { getCachedCoach } from "@/lib/coach";
+import { getDueReviewCount } from "@/lib/reviews";
+import { ArrowRight, BookOpen, Flame, Note, Play, Plus, Search, Share, Sparkle, Target } from "@/components/icons";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +57,8 @@ export default async function DashboardPage() {
   const today = active?.plan[0];
   const notes = getRecentNotes(user.id, 4);
   const streak = getStreak(user.id);
+  const dueReviews = getDueReviewCount(user.id);
+  const coach = getCachedCoach(user.id);
   const completedLessons = progresses.reduce((total, item) => total + item.completed, 0);
   const totalLessons = progresses.reduce((total, item) => total + item.total, 0);
   const dateLabel = new Intl.DateTimeFormat("en-US", {
@@ -285,6 +290,16 @@ export default async function DashboardPage() {
             </div>
 
             <aside className="dash-side">
+              {dueReviews > 0 ? (
+                <Link href="/review" className="review-due-card">
+                  <span className="kicker"><Target size={11} /> Due review</span>
+                  <strong>{dueReviews} question{dueReviews === 1 ? "" : "s"} to revisit</strong>
+                  <span>Clear the queue <ArrowRight size={12} /></span>
+                </Link>
+              ) : null}
+
+              <WeeklyCoach initial={coach} />
+
               <section className="streak-card">
                 <span className="kicker">Streak</span>
                 <div className="streak-number">
@@ -312,6 +327,8 @@ export default async function DashboardPage() {
                   <Link href="/new" className="quick-link"><Plus size={15} /> Build a new course</Link>
                   <Link href="/courses" className="quick-link"><BookOpen size={15} /> Browse all courses</Link>
                   <Link href="/roadmaps" className="quick-link"><Share size={15} /> Your roadmaps</Link>
+                  <Link href="/review" className="quick-link"><Target size={15} /> Due reviews{dueReviews > 0 ? ` (${dueReviews})` : ""}</Link>
+                  <Link href="/search" className="quick-link"><Search size={15} /> Search your library</Link>
                   <Link href="/api/export" className="quick-link"><Target size={15} /> Export a backup</Link>
                 </div>
               </section>

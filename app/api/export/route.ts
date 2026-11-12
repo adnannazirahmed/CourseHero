@@ -56,6 +56,8 @@ export async function GET() {
     "SELECT * FROM roadmap_enrollments WHERE user_id = ?",
   ).all(user.id);
   const activities = db.prepare("SELECT * FROM activities WHERE user_id = ?").all(user.id);
+  const quizReviews = db.prepare("SELECT * FROM quiz_reviews WHERE user_id = ?").all(user.id);
+  const weeklyCoach = db.prepare("SELECT * FROM weekly_coach WHERE user_id = ?").all(user.id);
 
   const payload = {
     exportedAt: new Date().toISOString(),
@@ -73,6 +75,8 @@ export async function GET() {
     roadmapItems,
     roadmapEnrollments,
     activities,
+    quizReviews,
+    weeklyCoach,
   };
 
   return new NextResponse(JSON.stringify(payload, null, 2), {

@@ -70,6 +70,8 @@ export async function POST(request: Request) {
   let roadmapItems: Row[];
   let roadmapEnrollments: Row[];
   let activities: Row[];
+  let quizReviews: Row[];
+  let weeklyCoach: Row[];
   try {
     const reader = request.body?.getReader();
     if (!reader) throw new Error("The import file is empty.");
@@ -101,6 +103,8 @@ export async function POST(request: Request) {
     roadmapItems = rows(source.roadmapItems, "roadmap items", 2_000);
     roadmapEnrollments = rows(source.roadmapEnrollments, "roadmap enrollments", 200);
     activities = rows(source.activities, "activities", 20_000);
+    quizReviews = rows(source.quizReviews ?? [], "quiz reviews", 20_000);
+    weeklyCoach = rows(source.weeklyCoach ?? [], "weekly coach", 200);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid export file." }, { status: 400 });
   }
@@ -230,6 +234,26 @@ export async function POST(request: Request) {
             activity.course_id == null ? null : mapped(courseIds, activity.course_id),
             activity.lesson_id == null ? null : lessonIds.get(str(activity.lesson_id, 150)) ?? null,
             str(activity.kind, 40), date(activity.created_at));
+      }
+      for (const review of quizReviews) {
+        if (str(review.user_id, 150) !== originalUserId) throw new Error("The export contains another account's review.");
+        const lessonId = mapped(lessonIds, review.lesson_id);
+        const quiz = db.prepare("SELECT id FROM quizzes WHERE lesson_id = ?").get(lessonId) as { id: string } | undefined;
+        if (!quiz) continue;
+        db.prepare(`INSERT OR IGNORE INTO quiz_reviews
+          (id, user_id, quiz_id, lesson_id, course_id, due_at, interval_days, misses, last_result, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(newId("review-"), user.id, quiz.id, lessonId, mapped(courseIds, review.course_id),
+            date(review.due_at), integer(review.interval_days, 1, 30), integer(review.misses),
+            str(review.last_result, 20), date(review.created_at), date(review.updated_at));
+      }
+      for (const coach of weeklyCoach) {
+        if (str(coach.user_id, 150) !== originalUserId) throw new Error("The export contains another account's coach.");
+        db.prepare(`INSERT OR IGNORE INTO weekly_coach
+          (id, user_id, week_key, summary, actions, focus, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`)
+          .run(newId("coach-"), user.id, str(coach.week_key, 20), str(coach.summary, 800),
+            str(coach.actions, 4000), optionalStr(coach.focus, 160), date(coach.created_at));
       }
       db.exec("COMMIT");
     } catch (error) {

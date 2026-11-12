@@ -2,7 +2,8 @@ import Link from "next/link";
 import { getLocalUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { AppHeader } from "@/components/AppHeader";
-import { ArrowLeft, Check, Note } from "@/components/icons";
+import { ArrowLeft, Check, Note, Sparkle } from "@/components/icons";
+import { getAiStatus } from "@/lib/ai";
 import { updateProfile } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default async function ProfilePage({
 }) {
   const user = getLocalUser();
   const params = await searchParams;
+  const ai = getAiStatus();
   const db = getDb();
   const stats = db
     .prepare(
@@ -138,6 +140,28 @@ export default async function ProfilePage({
             <div className="profile-snapshot-foot">
               <Note size={13} /> Everything here stays on this computer.
             </div>
+          </section>
+
+          <section className="panel ai-settings-card">
+            <div className="panel-head">
+              <div>
+                <span className="page-eyebrow"><Sparkle size={11} /> AI writer</span>
+                <h2 className="panel-title" style={{ marginTop: 4 }}>
+                  {ai.configured ? "AI is on" : "Local fallback is active"}
+                </h2>
+              </div>
+              <span className={`ai-status ${ai.configured ? "on" : "off"}`}>
+                {ai.configured ? "Configured" : "Not configured"}
+              </span>
+            </div>
+            <p className="profile-section-sub">
+              {ai.configured
+                ? `Model: ${ai.model}. Course generation, the tutor, AI notes, review help and the weekly coach can use it.`
+                : "Add AI_API_KEY and AI_MODEL to .env, then restart the app. Course generation, tutoring and AI study tools will switch on automatically."}
+            </p>
+            <p className="field-hint">
+              API keys stay on the server. They are never sent to the browser or saved in the database.
+            </p>
           </section>
 
           <p className="profile-credit">

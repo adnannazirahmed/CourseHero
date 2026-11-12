@@ -55,8 +55,8 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
 
   ensureEnrollment(user.id, course.id);
   const enrollment = getDb()
-    .prepare("SELECT target_days FROM enrollments WHERE user_id = ? AND course_id = ?")
-    .get(user.id, course.id) as { target_days: number | null } | undefined;
+    .prepare("SELECT target_days, created_at FROM enrollments WHERE user_id = ? AND course_id = ?")
+    .get(user.id, course.id) as { target_days: number | null; created_at: string } | undefined;
   const targetDays = Math.min(
     30,
     Math.max(1, enrollment?.target_days ?? course.target_days ?? 7),
@@ -78,6 +78,12 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
     (total, lesson) => total + Math.max(0, lesson.end_seconds - lesson.start_seconds),
     0,
   );
+  const elapsedDays = enrollment
+    ? Math.max(1, Math.floor((Date.now() - Date.parse(enrollment.created_at)) / 86_400_000) + 1)
+    : 1;
+  const expectedDone = Math.min(visible.length, Math.ceil((visible.length * Math.min(elapsedDays, targetDays)) / targetDays));
+  const paceDelta = done - expectedDone;
+  const paceLabel = paceDelta >= 0 ? `${paceDelta + 1} lesson${paceDelta === 0 ? "" : "s"} ahead of pace` : `${Math.abs(paceDelta)} lesson${Math.abs(paceDelta) === 1 ? "" : "s"} behind — the plan already covers it`;
 
   return (
     <>
@@ -108,6 +114,12 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
                 <span>{visible.length} lessons</span>
                 <span className="dot-sep" />
                 <span>{quizCount} quizzes</span>
+                {course.difficulty ? (
+                  <>
+                    <span className="dot-sep" />
+                    <span style={{ textTransform: "capitalize" }}>{course.difficulty}</span>
+                  </>
+                ) : null}
                 {course.added_by ? (
                   <>
                     <span className="dot-sep" />
@@ -115,6 +127,9 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
                   </>
                 ) : null}
               </div>
+              {course.course_goal ? (
+                <p className="course-goal-line"><Sparkle size={12} /> Goal: {course.course_goal}</p>
+              ) : null}
               <div className="course-actions">
                 {next ? (
                   <Link
@@ -148,6 +163,7 @@ export default async function CoursePage({ params }: { params: Promise<{ id: str
                     <h2 className="panel-title" style={{ marginTop: 4 }}>
                       {plan.length ? `${targetDays}-day finish line · up to ${dailyMinutes} min/study day` : "Course complete"}
                     </h2>
+                    {plan.length ? <p className="pace-note">{paceLabel}</p> : null}
                   </div>
                   {skipped.size > 0 ? (
                     <span className="pill">{skipped.size} known · skipped</span>

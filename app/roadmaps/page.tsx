@@ -3,7 +3,9 @@ import { getLocalUser } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { getCatalog } from "@/lib/data";
 import { AppHeader } from "@/components/AppHeader";
-import { ArrowRight, Layers, Plus } from "@/components/icons";
+import { ArrowRight, Layers, Plus, Sparkle } from "@/components/icons";
+import { GenerateRoadmapForm } from "@/components/GenerateRoadmapForm";
+import { getAiStatus } from "@/lib/ai";
 import { createRoadmap } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +102,16 @@ export default async function RoadmapsPage({
             </div>
 
             <aside className="dash-side">
+              <section className="panel" id="generate-roadmap">
+                <div className="panel-head">
+                  <div>
+                    <span className="page-eyebrow">Goal to path</span>
+                    <h2 className="panel-title" style={{ marginTop: 4 }}><Sparkle size={14} /> Generate a roadmap</h2>
+                  </div>
+                </div>
+                <GenerateRoadmapForm configured={getAiStatus().configured} />
+              </section>
+
               <section className="panel" id="new-roadmap">
                 <div className="panel-head">
                   <h2 className="panel-title">New roadmap</h2>

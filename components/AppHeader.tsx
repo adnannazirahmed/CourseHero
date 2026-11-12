@@ -1,10 +1,12 @@
 import Link from "next/link";
 import type { User } from "@/lib/auth";
+import { getDueReviewCount } from "@/lib/reviews";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
-import { Plus } from "./icons";
+import { Plus, Search } from "./icons";
 
 export function AppHeader({ user }: { user: User }) {
+  const dueReviews = getDueReviewCount(user.id);
   const initials = user.name
     .split(/\s+/)
     .map((part) => part[0])
@@ -23,6 +25,10 @@ export function AppHeader({ user }: { user: User }) {
           <Link href="/dashboard">Dashboard</Link>
           <Link href="/courses">Courses</Link>
           <Link href="/roadmaps">Roadmaps</Link>
+          <Link href="/review" className="nav-review">
+            Review{dueReviews > 0 ? <span className="nav-count">{dueReviews}</span> : null}
+          </Link>
+          <Link href="/search" aria-label="Search your library" className="nav-search"><Search size={14} /></Link>
         </nav>
         <div className="app-user">
           <Link href="/new" className="btn btn-primary btn-sm" style={{ marginRight: 4 }}>

@@ -8,6 +8,8 @@ export function NewCourseForm({ initialUrl = "" }: { initialUrl?: string }) {
   const router = useRouter();
   const [url, setUrl] = useState(initialUrl);
   const [days, setDays] = useState(7);
+  const [goal, setGoal] = useState("");
+  const [difficulty, setDifficulty] = useState("beginner");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,7 +26,7 @@ export function NewCourseForm({ initialUrl = "" }: { initialUrl?: string }) {
       const response = await fetch("/api/courses", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: url.trim(), days }),
+        body: JSON.stringify({ url: url.trim(), days, goal: goal.trim(), difficulty }),
       });
       const data = (await response.json()) as { id?: string; error?: string };
       if (!response.ok || !data.id) {
@@ -65,6 +67,35 @@ export function NewCourseForm({ initialUrl = "" }: { initialUrl?: string }) {
           <button type="submit" className="btn btn-primary" disabled={busy}>
             {busy ? "Building…" : "Build course"} {!busy ? <ArrowRight size={15} /> : null}
           </button>
+        </div>
+      </div>
+
+      <div className="new-form-grid">
+        <div className="field">
+          <label className="input-label" htmlFor="course-goal">What do you want from this course?</label>
+          <input
+            id="course-goal"
+            className="input"
+            placeholder="e.g. Build a RAG app I can deploy"
+            value={goal}
+            onChange={(event) => setGoal(event.target.value)}
+            maxLength={500}
+            disabled={busy}
+          />
+        </div>
+        <div className="field">
+          <label className="input-label" htmlFor="course-difficulty">Level</label>
+          <select
+            id="course-difficulty"
+            className="input select-input"
+            value={difficulty}
+            onChange={(event) => setDifficulty(event.target.value)}
+            disabled={busy}
+          >
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+          </select>
         </div>
       </div>
 
